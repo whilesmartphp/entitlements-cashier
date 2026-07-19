@@ -7,6 +7,7 @@ use Illuminate\Support\ServiceProvider;
 use Laravel\Cashier\Cashier;
 use Laravel\Cashier\Events\WebhookReceived;
 use Whilesmart\Entitlements\Contracts\BillingProvider;
+use Whilesmart\EntitlementsCashier\Console\SyncPricesCommand;
 use Whilesmart\EntitlementsCashier\Listeners\SyncEntitlementsFromWebhook;
 use Whilesmart\EntitlementsCashier\Models\BillingProfile;
 
@@ -26,6 +27,10 @@ class EntitlementsCashierServiceProvider extends ServiceProvider
         Cashier::useCustomerModel(config('entitlements-cashier.billing_profile_model', BillingProfile::class));
 
         Event::listen(WebhookReceived::class, SyncEntitlementsFromWebhook::class);
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([SyncPricesCommand::class]);
+        }
 
         if (config('entitlements-cashier.register_migrations', true)) {
             $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
