@@ -1,0 +1,11 @@
+name: Commit message validation
+
+on:
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: whilesmart/workflows/commits@main

@@ -1,0 +1,11 @@
+name: entitlements-cashier
+
+services:
+  app:
+    image: ghcr.io/whilesmartphp/laravel-dev:package-8.4
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: tail -f /dev/null
+    environment:
+      - APP_ENV=testing

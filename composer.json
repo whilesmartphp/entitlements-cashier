@@ -1,0 +1,54 @@
+{
+    "name": "whilesmart/entitlements-cashier",
+    "description": "Laravel Cashier billing adapter for whilesmart/eloquent-entitlements: fulfils the BillingProvider seam so any entitlement owner can check out through Stripe and have its subscription state reflected onto its plan.",
+    "type": "library",
+    "version": "0.1.0",
+    "license": "MIT",
+    "authors": [
+        { "name": "Whilesmart Team" }
+    ],
+    "require": {
+        "php": "^8.2",
+        "laravel/framework": "^11.0|^12.0",
+        "laravel/cashier": "^16.0",
+        "whilesmart/eloquent-entitlements": "^2.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0",
+        "laravel/pint": "^1.22",
+        "fakerphp/faker": "^1.24"
+    },
+    "config": {
+        "platform": {
+            "php": "8.2"
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Whilesmart\\EntitlementsCashier\\": "src/",
+            "Whilesmart\\EntitlementsCashier\\Database\\Factories\\": "database/factories/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Whilesmart\\EntitlementsCashier\\EntitlementsCashierServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/testbench package:test",
+        "clear": "@php vendor/bin/testbench package:purge-skeleton --ansi",
+        "prepare": "@php vendor/bin/testbench package:discover --ansi",
+        "build": "@php vendor/bin/testbench workbench:build --ansi",
+        "pint": ["./vendor/bin/pint"],
+        "pint:test": ["./vendor/bin/pint --test"]
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
