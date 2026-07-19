@@ -23,6 +23,16 @@ That is the whole integration. The service provider binds the `BillingProvider`,
 - **`createCheckout($owner, $plan)`** opens a Stripe Checkout session for the plan's `provider_price_id` and returns the redirect URL.
 - **The webhook listener** reflects `checkout.session.completed`, `customer.subscription.updated`, and `customer.subscription.deleted` onto the owner's entitlement subscription: the paid plan is granted, changed, or (on deletion) replaced with the configured `default_plan` or cancelled.
 
+## Prices
+
+A plan's amount is the single source of truth; you do not maintain a Stripe price id. Put the amount on the plan's `metadata.price` (`amount_cents`, `currency`, `interval`), then run:
+
+```
+php artisan entitlements-cashier:sync-prices
+```
+
+For each priced plan this creates a matching Stripe Price and records its id on the plan's `provider_price_id`. Stripe Prices are immutable, so a new one is created only when the amount, currency, or interval changes; the previous stays for existing subscribers. `PlanPriceSync` is also resolvable if you prefer to run it from your own seeder.
+
 ## Configuration
 
 Publish with `php artisan vendor:publish --tag=entitlements-cashier-config`.
