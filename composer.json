@@ -2,7 +2,7 @@
     "name": "whilesmart/entitlements-cashier",
     "description": "Laravel Cashier billing adapter for whilesmart/eloquent-entitlements: fulfils the BillingProvider seam so any entitlement owner can check out through Stripe and have its subscription state reflected onto its plan.",
     "type": "library",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "license": "MIT",
     "authors": [
         { "name": "Whilesmart Team" }

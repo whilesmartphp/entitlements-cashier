@@ -17,6 +17,10 @@ return [
     'success_url' => env('ENTITLEMENTS_CASHIER_SUCCESS_URL'),
     'cancel_url' => env('ENTITLEMENTS_CASHIER_CANCEL_URL'),
 
+    // Days of trial a checkout grants before the first charge. Null charges
+    // straight away, which is what happens when this is unset.
+    'trial_days' => env('ENTITLEMENTS_CASHIER_TRIAL_DAYS'),
+
     // The plan an owner falls back to when their Stripe subscription is deleted.
     // Null cancels the entitlement subscription instead of granting a plan.
     'default_plan' => env('ENTITLEMENTS_CASHIER_DEFAULT_PLAN'),

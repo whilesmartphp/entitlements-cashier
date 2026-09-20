@@ -4,6 +4,7 @@ namespace Whilesmart\EntitlementsCashier;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Laravel\Cashier\SubscriptionBuilder;
 use RuntimeException;
 use Whilesmart\Entitlements\Contracts\BillingProvider;
 use Whilesmart\Entitlements\Enums\SubscriptionStatus;
@@ -32,7 +33,7 @@ class CashierBillingProvider implements BillingProvider
             'plan_key' => $plan->key,
         ];
 
-        $checkout = $this->profileFor($owner)->newSubscription('default', $plan->provider_price_id)->checkout([
+        $checkout = $this->subscriptionFor($owner, $plan)->checkout([
             'success_url' => $this->returnUrl('success'),
             'cancel_url' => $this->returnUrl('cancel'),
             'metadata' => $reference,
@@ -191,5 +192,40 @@ class CashierBillingProvider implements BillingProvider
         $configured = config('entitlements-cashier.'.$status.'_url');
 
         return $configured ?: rtrim((string) config('app.url'), '/').'/billing/'.$status;
+    }
+
+    /**
+     * The subscription a checkout is started from, with any trial applied.
+     */
+    protected function subscriptionFor(Model $owner, Plan $plan): SubscriptionBuilder
+    {
+        $subscription = $this->profileFor($owner)->newSubscription('default', $plan->provider_price_id);
+
+        if (($days = $this->trialDays()) !== null) {
+            $subscription->trialDays($days);
+        }
+
+        return $subscription;
+    }
+
+    /**
+     * Days of trial a checkout grants, or null to charge straight away.
+     *
+     * Only a positive number is a trial. Zero, a negative, and anything that is
+     * not a number at all mean the same as unset, because a zero day trial is
+     * a trial that has already ended by the time the provider reads it.
+     */
+    protected function trialDays(): ?int
+    {
+        $days = config('entitlements-cashier.trial_days');
+
+        // Asked before casting, because a cast answers for things that are not
+        // numbers: true and [14] both come back as 1, which would be a trial
+        // nobody configured.
+        if (! is_numeric($days)) {
+            return null;
+        }
+
+        return (int) $days > 0 ? (int) $days : null;
     }
 }
