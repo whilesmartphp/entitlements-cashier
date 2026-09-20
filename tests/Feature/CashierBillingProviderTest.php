@@ -109,11 +109,27 @@ class CashierBillingProviderTest extends TestCase
         $this->assertNull(app(ReadableProvider::class)->trialDaysUnderTest());
     }
 
-    public function test_an_empty_trial_setting_is_treated_as_none(): void
+    /**
+     * @dataProvider notATrial
+     */
+    public function test_a_setting_that_is_not_a_positive_number_is_no_trial(mixed $setting): void
     {
-        config(['entitlements-cashier.trial_days' => '']);
+        config(['entitlements-cashier.trial_days' => $setting]);
 
         $this->assertNull(app(ReadableProvider::class)->trialDaysUnderTest());
+    }
+
+    public static function notATrial(): array
+    {
+        return [
+            'empty string' => [''],
+            'zero' => [0],
+            'zero as a string' => ['0'],
+            'negative' => [-1],
+            'negative as a string' => ['-7'],
+            'not a number' => ['abc'],
+            'a boolean from the environment' => ['true'],
+        ];
     }
 
     public function test_a_configured_trial_reaches_the_subscription(): void

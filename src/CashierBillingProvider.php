@@ -210,11 +210,15 @@ class CashierBillingProvider implements BillingProvider
 
     /**
      * Days of trial a checkout grants, or null to charge straight away.
+     *
+     * Only a positive number is a trial. Zero, a negative, and anything that is
+     * not a number at all mean the same as unset, because a zero day trial is
+     * a trial that has already ended by the time the provider reads it.
      */
     protected function trialDays(): ?int
     {
-        $days = config('entitlements-cashier.trial_days');
+        $days = (int) config('entitlements-cashier.trial_days');
 
-        return $days === null || $days === '' ? null : max(0, (int) $days);
+        return $days > 0 ? $days : null;
     }
 }
