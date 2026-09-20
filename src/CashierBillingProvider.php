@@ -217,8 +217,15 @@ class CashierBillingProvider implements BillingProvider
      */
     protected function trialDays(): ?int
     {
-        $days = (int) config('entitlements-cashier.trial_days');
+        $days = config('entitlements-cashier.trial_days');
 
-        return $days > 0 ? $days : null;
+        // Asked before casting, because a cast answers for things that are not
+        // numbers: true and [14] both come back as 1, which would be a trial
+        // nobody configured.
+        if (! is_numeric($days)) {
+            return null;
+        }
+
+        return (int) $days > 0 ? (int) $days : null;
     }
 }

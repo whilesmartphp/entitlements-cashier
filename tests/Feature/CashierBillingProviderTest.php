@@ -129,6 +129,9 @@ class CashierBillingProviderTest extends TestCase
             'negative as a string' => ['-7'],
             'not a number' => ['abc'],
             'a boolean from the environment' => ['true'],
+            'a real boolean' => [true],
+            'an array' => [[14]],
+            'null' => [null],
         ];
     }
 
