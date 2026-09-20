@@ -11,6 +11,23 @@ use Whilesmart\Entitlements\Models\Subscription;
 use Whilesmart\EntitlementsCashier\CashierBillingProvider;
 use Whilesmart\EntitlementsCashier\Models\BillingProfile;
 
+/**
+ * Reaches the protected seam, because building a subscription is the part worth
+ * asserting and calling checkout would reach Stripe.
+ */
+class ReadableProvider extends CashierBillingProvider
+{
+    public function subscriptionUnderTest($owner, Plan $plan)
+    {
+        return $this->subscriptionFor($owner, $plan);
+    }
+
+    public function trialDaysUnderTest(): ?int
+    {
+        return $this->trialDays();
+    }
+}
+
 class CashierBillingProviderTest extends TestCase
 {
     public function test_it_binds_as_the_billing_provider(): void
@@ -85,5 +102,42 @@ class CashierBillingProviderTest extends TestCase
 
         $this->assertSame($first->id, $second->id);
         $this->assertTrue($owner->is($first->owner));
+    }
+
+    public function test_no_trial_is_configured_by_default(): void
+    {
+        $this->assertNull(app(ReadableProvider::class)->trialDaysUnderTest());
+    }
+
+    public function test_an_empty_trial_setting_is_treated_as_none(): void
+    {
+        config(['entitlements-cashier.trial_days' => '']);
+
+        $this->assertNull(app(ReadableProvider::class)->trialDaysUnderTest());
+    }
+
+    public function test_a_configured_trial_reaches_the_subscription(): void
+    {
+        config(['entitlements-cashier.trial_days' => 14]);
+
+        $owner = Owner::create(['name' => 'Acme']);
+        $plan = Plan::create(['key' => 'business', 'name' => 'Business', 'provider_price_id' => 'price_biz']);
+
+        $subscription = app(ReadableProvider::class)->subscriptionUnderTest($owner, $plan);
+
+        $expires = (new \ReflectionProperty($subscription, 'trialExpires'))->getValue($subscription);
+
+        $this->assertNotNull($expires);
+        $this->assertSame(14, (int) round(now()->diffInDays($expires, false)));
+    }
+
+    public function test_no_trial_leaves_the_subscription_charging_straight_away(): void
+    {
+        $owner = Owner::create(['name' => 'Acme']);
+        $plan = Plan::create(['key' => 'business', 'name' => 'Business', 'provider_price_id' => 'price_biz']);
+
+        $subscription = app(ReadableProvider::class)->subscriptionUnderTest($owner, $plan);
+
+        $this->assertNull((new \ReflectionProperty($subscription, 'trialExpires'))->getValue($subscription));
     }
 }
