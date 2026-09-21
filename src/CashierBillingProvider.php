@@ -3,6 +3,7 @@
 namespace Whilesmart\EntitlementsCashier;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Laravel\Cashier\SubscriptionBuilder;
 use RuntimeException;
@@ -202,7 +203,11 @@ class CashierBillingProvider implements BillingProvider
         $subscription = $this->profileFor($owner)->newSubscription('default', $plan->provider_price_id);
 
         if (($days = $this->trialDays()) !== null) {
-            $subscription->trialDays($days);
+            // To the end of that day, not to this moment on it. Stripe is sent
+            // an instant and floors the difference when it says how many days
+            // are free, so a trial set to exactly now plus fourteen days reads
+            // as thirteen by the time the page is open.
+            $subscription->trialUntil(Carbon::now()->addDays($days)->endOfDay());
         }
 
         return $subscription;

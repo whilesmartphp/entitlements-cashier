@@ -147,7 +147,11 @@ class CashierBillingProviderTest extends TestCase
         $expires = (new \ReflectionProperty($subscription, 'trialExpires'))->getValue($subscription);
 
         $this->assertNotNull($expires);
-        $this->assertSame(14, (int) round(now()->diffInDays($expires, false)));
+
+        // What Stripe will say: it floors the difference, so anything short of
+        // a full fourteen days reads as thirteen.
+        $this->assertSame(14, (int) floor(now()->diffInDays($expires, false)));
+        $this->assertSame('23:59:59', $expires->format('H:i:s'));
     }
 
     public function test_no_trial_leaves_the_subscription_charging_straight_away(): void
