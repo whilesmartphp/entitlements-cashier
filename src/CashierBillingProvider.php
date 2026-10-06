@@ -4,7 +4,7 @@ namespace Whilesmart\EntitlementsCashier;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
-use Illuminate\Database\Eloquent\Relations\Relation;
+use Laravel\Cashier\Cashier;
 use Laravel\Cashier\SubscriptionBuilder;
 use RuntimeException;
 use Whilesmart\Entitlements\Contracts\BillingProvider;
@@ -28,32 +28,152 @@ class CashierBillingProvider implements BillingProvider
             throw new RuntimeException("Plan {$plan->key} has no provider price configured.");
         }
 
-        $reference = [
-            'owner_type' => $owner->getMorphClass(),
-            'owner_id' => (string) $owner->getKey(),
-            'plan_key' => $plan->key,
-        ];
+        $profile = $this->profileFor($owner);
 
-        $checkout = $this->subscriptionFor($owner, $plan)->checkout([
-            'success_url' => $this->returnUrl('success'),
-            'cancel_url' => $this->returnUrl('cancel'),
-            'metadata' => $reference,
-            'subscription_data' => ['metadata' => $reference],
-        ]);
+        return $profile->getConnection()->transaction(function () use ($owner, $plan, $profile) {
+            $profile = $profile->newQuery()->whereKey($profile->getKey())->lockForUpdate()->firstOrFail();
+            $subscription = $this->subscriptionForOwner($owner);
 
-        return $checkout->url;
+            $cashierSubscription = $profile->subscription('default');
+            if (($subscription !== null && $subscription->status !== SubscriptionStatus::Canceled
+                && ! empty($subscription->metadata['stripe_subscription_id']))
+                || ($cashierSubscription !== null && ! in_array($cashierSubscription->stripe_status, ['canceled', 'incomplete_expired'], true))) {
+                throw new RuntimeException('A subscription already exists. Use billing management to change it.');
+            }
+
+            if ($profile->checkout_expires_at?->isFuture() && $profile->checkout_url) {
+                return $profile->checkout_url;
+            }
+
+            $reference = [
+                'owner_type' => $owner->getMorphClass(),
+                'owner_id' => (string) $owner->getKey(),
+                'plan_key' => $plan->key,
+            ];
+            $builder = $this->subscriptionFor($owner, $plan);
+            $trial = $profile->trial_claimed_at === null && ($days = $this->trialDays()) !== null;
+
+            $subscriptionData = ['metadata' => $reference];
+            if ($trial) {
+                $subscriptionData['trial_period_days'] = $days;
+            }
+
+            $checkout = $builder->checkout([
+                'success_url' => $this->returnUrl('success'),
+                'cancel_url' => $this->returnUrl('cancel'),
+                'metadata' => $reference,
+                'subscription_data' => $subscriptionData,
+                'expires_at' => now()->addMinutes(30)->timestamp,
+            ]);
+            $profile->update([
+                'checkout_session_id' => $checkout->id,
+                'checkout_url' => $checkout->url,
+                'checkout_expires_at' => now()->addMinutes(30),
+            ]);
+
+            return $checkout->url;
+        });
     }
 
     public function syncFromWebhook(array $payload): void
     {
         $object = $payload['data']['object'] ?? [];
+        $type = $payload['type'] ?? '';
 
-        match ($payload['type'] ?? null) {
-            'checkout.session.completed' => $this->onCheckoutCompleted($object),
-            'customer.subscription.updated' => $this->onSubscriptionChanged($object),
-            'customer.subscription.deleted' => $this->onSubscriptionDeleted($object),
-            default => null,
-        };
+        if (! in_array($type, [
+            'checkout.session.completed', 'customer.subscription.created',
+            'customer.subscription.updated', 'customer.subscription.deleted',
+            'invoice.payment_failed', 'invoice.paid', 'invoice.payment_succeeded',
+        ], true)) {
+            return;
+        }
+
+        $id = str_starts_with($type, 'customer.subscription.')
+            ? ($object['id'] ?? null)
+            : ($object['subscription'] ?? $object['parent']['subscription_details']['subscription'] ?? null);
+
+        if (! is_string($id) || $id === '') {
+            return;
+        }
+
+        $current = Cashier::stripe()->subscriptions->retrieve($id, [])->toArray();
+        $owner = $this->ownerFromCustomer($current['customer'] ?? null);
+        $plan = Plan::where('provider_price_id', $current['items']['data'][0]['price']['id'] ?? null)->first();
+
+        if ($owner === null || $plan === null) {
+            throw new RuntimeException('Subscription owner or plan could not be resolved.');
+        }
+
+        $profile = $this->profileFor($owner);
+        $profile->getConnection()->transaction(function () use ($owner, $plan, $current, $profile, $payload, $object, $type) {
+            $profile = $profile->newQuery()->whereKey($profile->getKey())->lockForUpdate()->firstOrFail();
+            $current = Cashier::stripe()->subscriptions->retrieve($current['id'], [])->toArray();
+            $plan = Plan::where('provider_price_id', $current['items']['data'][0]['price']['id'] ?? null)->firstOrFail();
+            $existing = $this->subscriptionForOwner($owner);
+            $metadata = $existing?->metadata ?? [];
+            $incoming = (int) ($payload['created'] ?? 0);
+
+            if (! empty($metadata['stripe_subscription_id'])
+                && $metadata['stripe_subscription_id'] !== $current['id']
+                && (int) ($current['created'] ?? 0) <= (int) ($metadata['stripe_subscription_created'] ?? 0)) {
+                return;
+            }
+
+            $status = match ($current['status'] ?? '') {
+                'active' => SubscriptionStatus::Active,
+                'trialing' => SubscriptionStatus::Trialing,
+                'past_due', 'unpaid', 'incomplete', 'paused' => SubscriptionStatus::PastDue,
+                default => SubscriptionStatus::Canceled,
+            };
+
+            if ($type === 'invoice.payment_failed'
+                && ($current['latest_invoice'] ?? null) === ($object['id'] ?? null)) {
+                $invoice = Cashier::stripe()->invoices->retrieve($object['id'], [])->toArray();
+                if (($invoice['status'] ?? null) !== 'paid') {
+                    $status = SubscriptionStatus::PastDue;
+                }
+            }
+
+            $start = $current['current_period_start'] ?? $current['items']['data'][0]['current_period_start'] ?? null;
+            $end = $current['current_period_end'] ?? $current['items']['data'][0]['current_period_end'] ?? null;
+
+            if ($status === SubscriptionStatus::Trialing) {
+                $end = $current['trial_end'] ?? $end;
+            }
+
+            if ($end === null && in_array($status, [SubscriptionStatus::Active, SubscriptionStatus::Trialing], true)) {
+                throw new RuntimeException('The provider did not return an access expiry.');
+            }
+
+            $attributes = [
+                'plan_id' => $plan->getKey(),
+                'status' => $status,
+                'current_period_start' => $start ? Carbon::createFromTimestampUTC($start) : null,
+                'current_period_end' => $end ? Carbon::createFromTimestampUTC($end) : null,
+                'metadata' => array_merge($metadata, [
+                    'stripe_customer_id' => $current['customer'],
+                    'stripe_subscription_id' => $current['id'],
+                    'stripe_subscription_created' => (int) ($current['created'] ?? 0),
+                    'stripe_event_created' => max($incoming, (int) ($metadata['stripe_event_created'] ?? 0)),
+                    'cancel_at_period_end' => (bool) ($current['cancel_at_period_end'] ?? false),
+                ]),
+            ];
+
+            if ($existing) {
+                $existing->update($attributes);
+            } else {
+                $this->subscriptionModel()::create(array_merge($attributes, [
+                    'owner_type' => $owner->getMorphClass(),
+                    'owner_id' => $owner->getKey(),
+                ]));
+            }
+
+            $profile->update([
+                'checkout_expires_at' => null,
+                'checkout_url' => null,
+                'trial_claimed_at' => $profile->trial_claimed_at ?? (! empty($current['trial_start']) ? now() : null),
+            ]);
+        });
     }
 
     public function cancel(Subscription $subscription): void
@@ -65,87 +185,12 @@ class CashierBillingProvider implements BillingProvider
             : $this->profileFor($owner)->subscription('default')?->cancel();
     }
 
-    private function onCheckoutCompleted(array $session): void
-    {
-        $owner = $this->ownerFromReference($session['metadata'] ?? []);
-        $plan = Plan::where('key', $session['metadata']['plan_key'] ?? null)->first();
-
-        if ($owner !== null && $plan !== null) {
-            $this->activate($owner, $plan, [
-                'stripe_customer_id' => $session['customer'] ?? null,
-                'stripe_subscription_id' => $session['subscription'] ?? null,
-            ]);
-        }
-    }
-
-    private function onSubscriptionChanged(array $subscription): void
-    {
-        $owner = $this->ownerFromCustomer($subscription['customer'] ?? null);
-        $plan = Plan::where('provider_price_id', $subscription['items']['data'][0]['price']['id'] ?? null)->first();
-
-        if ($owner !== null && $plan !== null && in_array($subscription['status'] ?? '', ['active', 'trialing'], true)) {
-            $this->activate($owner, $plan, [
-                'stripe_customer_id' => $subscription['customer'] ?? null,
-                'stripe_subscription_id' => $subscription['id'] ?? null,
-            ]);
-        }
-    }
-
-    private function onSubscriptionDeleted(array $subscription): void
-    {
-        $owner = $this->ownerFromCustomer($subscription['customer'] ?? null);
-
-        if ($owner === null) {
-            return;
-        }
-
-        $fallback = config('entitlements-cashier.default_plan');
-        $plan = $fallback ? Plan::where('key', $fallback)->first() : null;
-
-        if ($plan !== null) {
-            $this->activate($owner, $plan, ['stripe_subscription_id' => null]);
-
-            return;
-        }
-
-        $this->activeSubscriptionFor($owner)?->update(['status' => SubscriptionStatus::Canceled]);
-    }
-
-    /**
-     * Point the owner's entitlement subscription at a plan, keeping one row.
-     */
-    private function activate(Model $owner, Plan $plan, array $meta): void
-    {
-        $existing = $this->activeSubscriptionFor($owner);
-        $metadata = array_merge($existing?->metadata ?? [], array_filter($meta, fn ($v) => $v !== null));
-
-        if ($existing !== null) {
-            $existing->update([
-                'plan_id' => $plan->getKey(),
-                'status' => SubscriptionStatus::Active,
-                'metadata' => $metadata ?: null,
-            ]);
-
-            return;
-        }
-
-        $this->subscriptionModel()::create([
-            'owner_type' => $owner->getMorphClass(),
-            'owner_id' => $owner->getKey(),
-            'plan_id' => $plan->getKey(),
-            'status' => SubscriptionStatus::Active,
-            'metadata' => $metadata ?: null,
-        ]);
-    }
-
-    private function activeSubscriptionFor(Model $owner): ?Subscription
+    private function subscriptionForOwner(Model $owner): ?Subscription
     {
         return $this->subscriptionModel()::query()
             ->where('owner_type', $owner->getMorphClass())
             ->where('owner_id', $owner->getKey())
-            ->active()
-            ->latest('id')
-            ->first();
+            ->latest('id')->first();
     }
 
     private function profileFor(Model $owner): BillingProfile
@@ -156,20 +201,6 @@ class CashierBillingProvider implements BillingProvider
             'owner_type' => $owner->getMorphClass(),
             'owner_id' => $owner->getKey(),
         ]);
-    }
-
-    private function ownerFromReference(array $metadata): ?Model
-    {
-        $type = $metadata['owner_type'] ?? null;
-        $id = $metadata['owner_id'] ?? null;
-
-        if ($type === null || $id === null) {
-            return null;
-        }
-
-        $class = Relation::getMorphedModel($type) ?? $type;
-
-        return class_exists($class) ? $class::find($id) : null;
     }
 
     private function ownerFromCustomer(?string $customerId): ?Model
@@ -192,25 +223,12 @@ class CashierBillingProvider implements BillingProvider
     {
         $configured = config('entitlements-cashier.'.$status.'_url');
 
-        return $configured ?: rtrim((string) config('app.url'), '/').'/billing/'.$status;
+        return $configured ?: rtrim((string) config('app.url'), '/').'/billing?checkout='.($status === 'cancel' ? 'cancelled' : 'success');
     }
 
-    /**
-     * The subscription a checkout is started from, with any trial applied.
-     */
     protected function subscriptionFor(Model $owner, Plan $plan): SubscriptionBuilder
     {
-        $subscription = $this->profileFor($owner)->newSubscription('default', $plan->provider_price_id);
-
-        if (($days = $this->trialDays()) !== null) {
-            // To the end of that day, not to this moment on it. Stripe is sent
-            // an instant and floors the difference when it says how many days
-            // are free, so a trial set to exactly now plus fourteen days reads
-            // as thirteen by the time the page is open.
-            $subscription->trialUntil(Carbon::now()->addDays($days)->endOfDay());
-        }
-
-        return $subscription;
+        return $this->profileFor($owner)->newSubscription('default', $plan->provider_price_id);
     }
 
     /**

@@ -17,6 +17,12 @@ class BillingProfile extends Model
 
     protected $guarded = ['id'];
 
+    protected $casts = [
+        'trial_ends_at' => 'datetime',
+        'trial_claimed_at' => 'datetime',
+        'checkout_expires_at' => 'datetime',
+    ];
+
     public function getTable(): string
     {
         return config('entitlements-cashier.profiles_table', 'billing_profiles');

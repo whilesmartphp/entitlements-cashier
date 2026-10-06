@@ -21,7 +21,7 @@ That is the whole integration. The service provider binds the `BillingProvider`,
 
 - **`BillingProfile`** is the Cashier customer, keyed to a polymorphic `owner`. It is separate from the owner model so Cashier's `Billable` trait never collides with the owner's own `invoices()` / `subscriptions()` relations.
 - **`createCheckout($owner, $plan)`** opens a Stripe Checkout session for the plan's `provider_price_id` and returns the redirect URL.
-- **The webhook listener** reflects `checkout.session.completed`, `customer.subscription.updated`, and `customer.subscription.deleted` onto the owner's entitlement subscription: the paid plan is granted, changed, or (on deletion) replaced with the configured `default_plan` or cancelled.
+- **The webhook listener** retrieves the current subscription from Stripe before updating access. Trial and active subscriptions carry an expiry. Failed payments suspend access immediately; a recovered payment restores it. Cancellation at period end preserves access until expiry. Older events for replaced subscriptions cannot overwrite the replacement.
 
 ## Prices
 
@@ -42,7 +42,7 @@ Publish with `php artisan vendor:publish --tag=entitlements-cashier-config`.
 | `billing_profile_model` | Swap the Cashier billable model for a host subclass. |
 | `profiles_table` | The billing profiles table name. |
 | `success_url` / `cancel_url` | Where Stripe Checkout returns; defaults to the app URL. |
-| `default_plan` | Plan an owner falls back to when its Stripe subscription is deleted. Null cancels the entitlement instead. |
+| `default_plan` | Plan used when no subscription grants access. A host-provided plan source retains precedence. |
 | `register_migrations` | Set false to bring your own migrations. |
 
 ## Testing
@@ -50,3 +50,15 @@ Publish with `php artisan vendor:publish --tag=entitlements-cashier-config`.
 ```
 composer test
 ```
+
+
+## Checkout and webhook access
+
+A signing secret is required. Unsigned webhooks are rejected even when the host has
+not configured billing. Subscribe to checkout completion, subscription creation,
+updates and deletion, invoice payment failure and successful invoice payment events.
+Stripe retries a failed delivery; the listener retrieves current state on each retry.
+
+An owner reuses an unexpired checkout session. Existing subscriptions are managed
+through the customer portal. Trial eligibility is claimed only when Stripe confirms
+an actual trial, and the trial lasts the configured number of days from activation.

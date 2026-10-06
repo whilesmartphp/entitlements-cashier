@@ -6,7 +6,10 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Cashier\Cashier;
 use Laravel\Cashier\Events\WebhookReceived;
+use Laravel\Cashier\Http\Controllers\WebhookController;
 use Whilesmart\Entitlements\Contracts\BillingProvider;
+use Whilesmart\Entitlements\Contracts\PlanSource;
+use Whilesmart\Entitlements\Support\EloquentPlanSource;
 use Whilesmart\EntitlementsCashier\Console\SyncPricesCommand;
 use Whilesmart\EntitlementsCashier\Listeners\SyncEntitlementsFromWebhook;
 use Whilesmart\EntitlementsCashier\Models\BillingProfile;
@@ -20,10 +23,15 @@ class EntitlementsCashierServiceProvider extends ServiceProvider
         // Fulfil the entitlements checkout seam. bind() overrides the package's
         // NullBillingProvider default regardless of provider load order.
         $this->app->bind(BillingProvider::class, CashierBillingProvider::class);
+        $this->app->bind(WebhookController::class, Http\Controllers\WebhookController::class);
     }
 
     public function boot(): void
     {
+        if ($this->app->make(PlanSource::class) instanceof EloquentPlanSource) {
+            $this->app->singleton(PlanSource::class, DefaultPlanSource::class);
+        }
+
         Cashier::useCustomerModel(config('entitlements-cashier.billing_profile_model', BillingProfile::class));
 
         Event::listen(WebhookReceived::class, SyncEntitlementsFromWebhook::class);
