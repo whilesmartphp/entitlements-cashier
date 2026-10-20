@@ -1,0 +1,37 @@
+{
+  "id": "cs_review_fixture1",
+  "object": "checkout.session",
+  "customer": "cus_review_fixture1",
+  "status": "open",
+  "url": "https://example.invalid/checkout/cs_review_fixture1",
+  "metadata": {
+    "owner_id": "1",
+    "owner_type": "Tests\\Fixtures\\Owner",
+    "plan_key": "monthly-us"
+  },
+  "expires_at": 1792534328,
+  "mode": "subscription",
+  "line_items": {
+    "object": "list",
+    "data": [
+      {
+        "id": "li_review_fixture1",
+        "object": "item",
+        "price": {
+          "id": "price_review_fixture1",
+          "object": "price",
+          "currency": "usd",
+          "unit_amount": 899,
+          "recurring": {
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          }
+        },
+        "quantity": 1
+      }
+    ]
+  }
+}

@@ -4,6 +4,7 @@ namespace Whilesmart\EntitlementsCashier;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 use Laravel\Cashier\Cashier;
 use Laravel\Cashier\SubscriptionBuilder;
 use RuntimeException;
@@ -45,8 +46,18 @@ class CashierBillingProvider implements BillingProvider
                 $profile->updateStripeCustomer(['email' => $profile->stripeEmail()]);
             }
 
-            if ($profile->checkout_expires_at?->isFuture() && $profile->checkout_url) {
-                return $profile->checkout_url;
+            if ($profile->checkout_expires_at?->isFuture() && $profile->checkout_url && $profile->checkout_session_id) {
+                $pending = Cashier::stripe()->checkout->sessions->retrieve($profile->checkout_session_id, ['expand' => ['line_items']]);
+                if ($pending->status === 'complete') {
+                    throw new RuntimeException('Checkout is complete. Refresh billing status before changing plans.');
+                }
+                if ($pending->status === 'open') {
+                    if (($pending->metadata->plan_key ?? null) === $plan->key
+                        && ($pending->line_items->data[0]->price->id ?? null) === $plan->provider_price_id) {
+                        return $profile->checkout_url;
+                    }
+                    Cashier::stripe()->checkout->sessions->expire($profile->checkout_session_id, []);
+                }
             }
 
             $reference = [
@@ -102,18 +113,15 @@ class CashierBillingProvider implements BillingProvider
 
         $current = Cashier::stripe()->subscriptions->retrieve($id, [])->toArray();
         $owner = $this->ownerFromCustomer($current['customer'] ?? null);
-        $plan = $this->planForPrice($current['items']['data'][0]['price']['id'] ?? null);
-
-        if ($owner === null || $plan === null) {
-            throw new RuntimeException('Subscription owner or plan could not be resolved.');
+        if ($owner === null) {
+            return;
         }
 
         $profile = $this->profileFor($owner);
-        $profile->getConnection()->transaction(function () use ($owner, $plan, $current, $profile, $payload, $object, $type) {
+        $profile->getConnection()->transaction(function () use ($owner, $current, $profile, $payload, $object, $type) {
             $profile = $profile->newQuery()->whereKey($profile->getKey())->lockForUpdate()->firstOrFail();
             $current = Cashier::stripe()->subscriptions->retrieve($current['id'], [])->toArray();
-            $plan = $this->planForPrice($current['items']['data'][0]['price']['id'] ?? null)
-                ?? throw new RuntimeException('Subscription plan could not be resolved.');
+            $plan = $this->planForPrice($current['items']['data'][0]['price']['id'] ?? null);
             $existing = $this->subscriptionForOwner($owner);
             $metadata = $existing?->metadata ?? [];
             $incoming = (int) ($payload['created'] ?? 0);
@@ -130,6 +138,16 @@ class CashierBillingProvider implements BillingProvider
                 'past_due', 'unpaid', 'incomplete', 'paused' => SubscriptionStatus::PastDue,
                 default => SubscriptionStatus::Canceled,
             };
+
+            if ($plan === null) {
+                Log::warning('Stripe subscription price is not mapped to a plan.', ['subscription_id' => $current['id']]);
+                if ($existing === null) {
+                    return;
+                }
+                if (in_array($status, [SubscriptionStatus::Active, SubscriptionStatus::Trialing], true)) {
+                    $status = SubscriptionStatus::PastDue;
+                }
+            }
 
             if ($type === 'invoice.payment_failed'
                 && ($current['latest_invoice'] ?? null) === ($object['id'] ?? null)) {
@@ -151,7 +169,7 @@ class CashierBillingProvider implements BillingProvider
             }
 
             $attributes = [
-                'plan_id' => $plan->getKey(),
+                'plan_id' => $plan?->getKey() ?? $existing->plan_id,
                 'status' => $status,
                 'current_period_start' => $start ? Carbon::createFromTimestampUTC($start) : null,
                 'current_period_end' => $end ? Carbon::createFromTimestampUTC($end) : null,

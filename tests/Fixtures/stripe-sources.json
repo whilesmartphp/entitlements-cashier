@@ -8,5 +8,7 @@
     "Identifiers",
     "Customer details",
     "Owner metadata"
-  ]
+  ],
+  "checkout_lifecycle": "https://docs.stripe.com/api/checkout/sessions",
+  "cancellation_event": "https://docs.stripe.com/api/events/retrieve"
 }
