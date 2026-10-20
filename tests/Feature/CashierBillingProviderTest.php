@@ -3,10 +3,15 @@
 namespace Tests\Feature;
 
 use RuntimeException;
+use Stripe\ApiRequestor;
+use Stripe\HttpClient\ClientInterface;
+use Stripe\HttpClient\CurlClient;
+use Stripe\WebhookSignature;
 use Tests\Fixtures\Owner;
 use Tests\TestCase;
 use Whilesmart\Entitlements\Contracts\BillingProvider;
 use Whilesmart\Entitlements\Models\Plan;
+use Whilesmart\Entitlements\Models\Subscription;
 use Whilesmart\EntitlementsCashier\CashierBillingProvider;
 use Whilesmart\EntitlementsCashier\Models\BillingProfile;
 
@@ -29,6 +34,35 @@ class ReadableProvider extends CashierBillingProvider
 
 class CashierBillingProviderTest extends TestCase
 {
+    public function test_signed_webhooks_recognize_existing_subscription_prices_after_a_catalog_change(): void
+    {
+        $subscription = json_decode(file_get_contents(__DIR__.'/../Fixtures/stripe-subscription.json'), true);
+        $owner = Owner::create(['name' => 'Test Customer']);
+        BillingProfile::forOwner($owner)->update(['stripe_id' => $subscription['customer']]);
+        $plan = Plan::create([
+            'key' => 'monthly', 'name' => 'Monthly', 'provider_price_id' => 'price_updated',
+            'metadata' => ['stripe_price_ids' => [$subscription['items']['data'][0]['price']['id']]],
+        ]);
+        config(['cashier.secret' => 'your-api-key-here', 'cashier.webhook.secret' => 'your-webhook-secret-here']);
+        $client = \Mockery::mock(ClientInterface::class);
+        $client->shouldReceive('request')->twice()->withArgs(fn ($method, $url) => $method === 'get'
+            && str_ends_with($url, '/subscriptions/'.$subscription['id']))
+            ->andReturn([json_encode($subscription), 200, []]);
+        ApiRequestor::setHttpClient($client);
+        $payload = file_get_contents(__DIR__.'/../Fixtures/stripe-checkout-completed.json');
+
+        try {
+            $this->call('POST', '/stripe/webhook', server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_STRIPE_SIGNATURE' => WebhookSignature::generateSignatureHeader($payload, 'your-webhook-secret-here'),
+            ], content: $payload)->assertOk();
+        } finally {
+            ApiRequestor::setHttpClient(CurlClient::instance());
+        }
+
+        $this->assertSame($plan->id, Subscription::firstOrFail()->plan_id);
+    }
+
     public function test_it_binds_as_the_billing_provider(): void
     {
         $this->assertInstanceOf(CashierBillingProvider::class, app(BillingProvider::class));

@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-10-20",
+  "environment": "Stripe test mode",
+  "subscription": "https://docs.stripe.com/api/subscriptions/retrieve",
+  "checkout_event": "https://docs.stripe.com/api/events/retrieve",
+  "price": "https://docs.stripe.com/api/prices/retrieve",
+  "redacted_fields": [
+    "Identifiers",
+    "Customer details",
+    "Owner metadata"
+  ]
+}

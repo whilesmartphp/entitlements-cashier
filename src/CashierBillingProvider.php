@@ -98,7 +98,7 @@ class CashierBillingProvider implements BillingProvider
 
         $current = Cashier::stripe()->subscriptions->retrieve($id, [])->toArray();
         $owner = $this->ownerFromCustomer($current['customer'] ?? null);
-        $plan = Plan::where('provider_price_id', $current['items']['data'][0]['price']['id'] ?? null)->first();
+        $plan = $this->planForPrice($current['items']['data'][0]['price']['id'] ?? null);
 
         if ($owner === null || $plan === null) {
             throw new RuntimeException('Subscription owner or plan could not be resolved.');
@@ -108,7 +108,8 @@ class CashierBillingProvider implements BillingProvider
         $profile->getConnection()->transaction(function () use ($owner, $plan, $current, $profile, $payload, $object, $type) {
             $profile = $profile->newQuery()->whereKey($profile->getKey())->lockForUpdate()->firstOrFail();
             $current = Cashier::stripe()->subscriptions->retrieve($current['id'], [])->toArray();
-            $plan = Plan::where('provider_price_id', $current['items']['data'][0]['price']['id'] ?? null)->firstOrFail();
+            $plan = $this->planForPrice($current['items']['data'][0]['price']['id'] ?? null)
+                ?? throw new RuntimeException('Subscription plan could not be resolved.');
             $existing = $this->subscriptionForOwner($owner);
             $metadata = $existing?->metadata ?? [];
             $incoming = (int) ($payload['created'] ?? 0);
@@ -183,6 +184,16 @@ class CashierBillingProvider implements BillingProvider
         $owner === null
             ? null
             : $this->profileFor($owner)->subscription('default')?->cancel();
+    }
+
+    private function planForPrice(?string $priceId): ?Plan
+    {
+        if ($priceId === null || $priceId === '') {
+            return null;
+        }
+
+        return Plan::where('provider_price_id', $priceId)
+            ->orWhereJsonContains('metadata->stripe_price_ids', $priceId)->first();
     }
 
     private function subscriptionForOwner(Model $owner): ?Subscription

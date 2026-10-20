@@ -56,7 +56,13 @@ class PlanPriceSync
 
         $plan->update([
             'provider_price_id' => $created->id,
-            'metadata' => array_merge($plan->metadata ?? [], ['price_signature' => $signature]),
+            'metadata' => array_merge($plan->metadata ?? [], [
+                'price_signature' => $signature,
+                'stripe_price_ids' => array_values(array_unique(array_filter(array_merge(
+                    (array) data_get($plan->metadata, 'stripe_price_ids', []),
+                    [$plan->provider_price_id, $created->id],
+                )))),
+            ]),
         ]);
     }
 
