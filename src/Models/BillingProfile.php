@@ -33,6 +33,11 @@ class BillingProfile extends Model
         return $this->morphTo();
     }
 
+    public function stripeEmail(): ?string
+    {
+        return $this->owner?->email;
+    }
+
     /**
      * The billing profile for an owner, created on first use.
      */

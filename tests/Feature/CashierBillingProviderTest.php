@@ -34,6 +34,25 @@ class ReadableProvider extends CashierBillingProvider
 
 class CashierBillingProviderTest extends TestCase
 {
+    public function test_billing_email_comes_from_the_current_owner(): void
+    {
+        $owner = Owner::create(['name' => 'Test Customer']);
+        $owner->setAttribute('email', 'customer@example.com');
+        $profile = BillingProfile::forOwner($owner);
+        $profile->setRelation('owner', $owner);
+
+        $this->assertSame('customer@example.com', $profile->stripeEmail());
+        $owner->setAttribute('email', 'updated@example.com');
+        $this->assertSame('updated@example.com', $profile->stripeEmail());
+    }
+
+    public function test_billing_email_can_be_absent(): void
+    {
+        $owner = Owner::create(['name' => 'Test Customer']);
+
+        $this->assertNull(BillingProfile::forOwner($owner)->stripeEmail());
+    }
+
     public function test_signed_webhooks_recognize_existing_subscription_prices_after_a_catalog_change(): void
     {
         $subscription = json_decode(file_get_contents(__DIR__.'/../Fixtures/stripe-subscription.json'), true);

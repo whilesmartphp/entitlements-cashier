@@ -41,6 +41,10 @@ class CashierBillingProvider implements BillingProvider
                 throw new RuntimeException('A subscription already exists. Use billing management to change it.');
             }
 
+            if ($profile->hasStripeId() && filled($profile->stripeEmail())) {
+                $profile->updateStripeCustomer(['email' => $profile->stripeEmail()]);
+            }
+
             if ($profile->checkout_expires_at?->isFuture() && $profile->checkout_url) {
                 return $profile->checkout_url;
             }
