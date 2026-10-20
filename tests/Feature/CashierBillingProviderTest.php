@@ -40,6 +40,13 @@ class CashierBillingProviderTest extends TestCase
         $this->postJson('/stripe/webhook', [])->assertStatus(503);
     }
 
+    public function test_routes_can_be_listed_without_a_webhook_signing_secret(): void
+    {
+        config(['cashier.webhook.secret' => null]);
+
+        $this->artisan('route:list', ['--path' => 'stripe'])->assertSuccessful();
+    }
+
     public function test_webhook_rejects_an_unsigned_request(): void
     {
         config(['cashier.webhook.secret' => 'your-webhook-secret-here']);
