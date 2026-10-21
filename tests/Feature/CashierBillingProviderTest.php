@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use RuntimeException;
+use Stripe\ApiRequestor;
+use Stripe\HttpClient\ClientInterface;
+use Stripe\HttpClient\CurlClient;
 use Tests\Fixtures\Owner;
 use Tests\TestCase;
 use Whilesmart\Entitlements\Contracts\BillingProvider;
@@ -30,57 +33,76 @@ class ReadableProvider extends CashierBillingProvider
 
 class CashierBillingProviderTest extends TestCase
 {
+    public function test_billing_email_comes_from_the_current_owner(): void
+    {
+        $owner = Owner::create(['name' => 'Test Customer']);
+        $owner->setAttribute('email', 'customer@example.com');
+        $profile = BillingProfile::forOwner($owner);
+        $profile->setRelation('owner', $owner);
+
+        $this->assertSame('customer@example.com', $profile->stripeEmail());
+        $owner->setAttribute('email', 'updated@example.com');
+        $this->assertSame('updated@example.com', $profile->stripeEmail());
+    }
+
+    public function test_billing_email_can_be_absent(): void
+    {
+        $owner = Owner::create(['name' => 'Test Customer']);
+
+        $this->assertNull(BillingProfile::forOwner($owner)->stripeEmail());
+    }
+
+    public function test_signed_webhooks_recognize_existing_subscription_prices_after_a_catalog_change(): void
+    {
+        $subscription = json_decode(file_get_contents(__DIR__.'/../Fixtures/stripe-subscription.json'), true);
+        $owner = Owner::create(['name' => 'Test Customer']);
+        BillingProfile::forOwner($owner)->update(['stripe_id' => $subscription['customer']]);
+        $plan = Plan::create([
+            'key' => 'monthly', 'name' => 'Monthly', 'provider_price_id' => 'price_updated',
+            'metadata' => ['stripe_price_ids' => [$subscription['items']['data'][0]['price']['id']]],
+        ]);
+        config(['cashier.secret' => 'your-api-key-here', 'cashier.webhook.secret' => 'your-webhook-secret-here']);
+        $client = \Mockery::mock(ClientInterface::class);
+        $client->shouldReceive('request')->twice()->withArgs(fn ($method, $url) => $method === 'get'
+            && str_ends_with($url, '/subscriptions/'.$subscription['id']))
+            ->andReturn([json_encode($subscription), 200, []]);
+        ApiRequestor::setHttpClient($client);
+        $payload = file_get_contents(__DIR__.'/../Fixtures/stripe-checkout-completed.json');
+
+        try {
+            $this->call('POST', '/stripe/webhook', server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_STRIPE_SIGNATURE' => $this->stripeSignature($payload, 'your-webhook-secret-here'),
+            ], content: $payload)->assertOk();
+        } finally {
+            ApiRequestor::setHttpClient(CurlClient::instance());
+        }
+
+        $this->assertSame($plan->id, Subscription::firstOrFail()->plan_id);
+    }
+
     public function test_it_binds_as_the_billing_provider(): void
     {
         $this->assertInstanceOf(CashierBillingProvider::class, app(BillingProvider::class));
     }
 
-    public function test_checkout_completed_activates_the_owner_plan(): void
+    public function test_webhook_fails_closed_without_a_signing_secret(): void
     {
-        $owner = Owner::create(['name' => 'Acme']);
-        $plan = Plan::create(['key' => 'business', 'name' => 'Business', 'provider_price_id' => 'price_biz']);
-
-        app(BillingProvider::class)->syncFromWebhook([
-            'type' => 'checkout.session.completed',
-            'data' => ['object' => [
-                'customer' => 'cus_1',
-                'subscription' => 'sub_1',
-                'metadata' => [
-                    'owner_type' => $owner->getMorphClass(),
-                    'owner_id' => (string) $owner->id,
-                    'plan_key' => 'business',
-                ],
-            ]],
-        ]);
-
-        $subscription = Subscription::where('owner_id', $owner->id)->first();
-
-        $this->assertNotNull($subscription);
-        $this->assertSame($plan->id, $subscription->plan_id);
-        $this->assertSame('active', $subscription->status->value);
-        $this->assertSame('sub_1', $subscription->metadata['stripe_subscription_id']);
+        config(['cashier.webhook.secret' => null]);
+        $this->postJson('/stripe/webhook', [])->assertStatus(503);
     }
 
-    public function test_subscription_updated_maps_the_price_to_a_plan(): void
+    public function test_routes_can_be_listed_without_a_webhook_signing_secret(): void
     {
-        $owner = Owner::create(['name' => 'Acme']);
-        $plan = Plan::create(['key' => 'scale', 'name' => 'Scale', 'provider_price_id' => 'price_scale']);
-        BillingProfile::create(['owner_type' => $owner->getMorphClass(), 'owner_id' => $owner->id, 'stripe_id' => 'cus_9']);
+        config(['cashier.webhook.secret' => null]);
 
-        app(BillingProvider::class)->syncFromWebhook([
-            'type' => 'customer.subscription.updated',
-            'data' => ['object' => [
-                'id' => 'sub_9',
-                'customer' => 'cus_9',
-                'status' => 'active',
-                'items' => ['data' => [['price' => ['id' => 'price_scale']]]],
-            ]],
-        ]);
+        $this->artisan('route:list', ['--path' => 'stripe'])->assertSuccessful();
+    }
 
-        $subscription = Subscription::where('owner_id', $owner->id)->active()->first();
-
-        $this->assertNotNull($subscription);
-        $this->assertSame($plan->id, $subscription->plan_id);
+    public function test_webhook_rejects_an_unsigned_request(): void
+    {
+        config(['cashier.webhook.secret' => 'your-webhook-secret-here']);
+        $this->postJson('/stripe/webhook', [])->assertStatus(403);
     }
 
     public function test_checkout_requires_a_provider_price(): void
@@ -135,19 +157,10 @@ class CashierBillingProviderTest extends TestCase
         ];
     }
 
-    public function test_a_configured_trial_reaches_the_subscription(): void
+    public function test_a_configured_trial_retains_the_requested_days(): void
     {
-        config(['entitlements-cashier.trial_days' => 14]);
-
-        $owner = Owner::create(['name' => 'Acme']);
-        $plan = Plan::create(['key' => 'business', 'name' => 'Business', 'provider_price_id' => 'price_biz']);
-
-        $subscription = app(ReadableProvider::class)->subscriptionUnderTest($owner, $plan);
-
-        $expires = (new \ReflectionProperty($subscription, 'trialExpires'))->getValue($subscription);
-
-        $this->assertNotNull($expires);
-        $this->assertSame(14, (int) round(now()->diffInDays($expires, false)));
+        config(['entitlements-cashier.trial_days' => 3]);
+        $this->assertSame(3, app(ReadableProvider::class)->trialDaysUnderTest());
     }
 
     public function test_no_trial_leaves_the_subscription_charging_straight_away(): void

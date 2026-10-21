@@ -16,6 +16,7 @@ return [
     // Where Stripe Checkout returns the customer. Defaults to the app URL.
     'success_url' => env('ENTITLEMENTS_CASHIER_SUCCESS_URL'),
     'cancel_url' => env('ENTITLEMENTS_CASHIER_CANCEL_URL'),
+    'portal_return_url' => env('ENTITLEMENTS_CASHIER_PORTAL_RETURN_URL'),
 
     // Days of trial a checkout grants before the first charge. Null charges
     // straight away, which is what happens when this is unset.
