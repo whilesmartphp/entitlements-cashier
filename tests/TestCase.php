@@ -15,6 +15,13 @@ abstract class TestCase extends BaseTestCase
 {
     use RefreshDatabase;
 
+    protected function stripeSignature(string $payload, string $secret): string
+    {
+        $timestamp = time();
+
+        return 't='.$timestamp.',v1='.hash_hmac('sha256', $timestamp.'.'.$payload, $secret);
+    }
+
     protected function defineDatabaseMigrations(): void
     {
         // The entitlements and this package's migrations load through their

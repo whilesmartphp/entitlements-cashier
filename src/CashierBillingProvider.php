@@ -4,10 +4,13 @@ namespace Whilesmart\EntitlementsCashier;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Laravel\Cashier\Cashier;
 use Laravel\Cashier\SubscriptionBuilder;
 use RuntimeException;
+use Stripe\Checkout\Session;
 use Whilesmart\Entitlements\Contracts\BillingProvider;
 use Whilesmart\Entitlements\Enums\SubscriptionStatus;
 use Whilesmart\Entitlements\Models\Plan;
@@ -31,63 +34,142 @@ class CashierBillingProvider implements BillingProvider
 
         $profile = $this->profileFor($owner);
 
-        return $profile->getConnection()->transaction(function () use ($owner, $plan, $profile) {
-            $profile = $profile->newQuery()->whereKey($profile->getKey())->lockForUpdate()->firstOrFail();
-            $subscription = $this->subscriptionForOwner($owner);
-
-            $cashierSubscription = $profile->subscription('default');
-            if (($subscription !== null && $subscription->status !== SubscriptionStatus::Canceled
-                && ! empty($subscription->metadata['stripe_subscription_id']))
-                || ($cashierSubscription !== null && ! in_array($cashierSubscription->stripe_status, ['canceled', 'incomplete_expired'], true))) {
-                throw new RuntimeException('A subscription already exists. Use billing management to change it.');
-            }
-
+        return Cache::lock($this->checkoutLock($profile), 300)->block(5, function () use ($owner, $plan, $profile) {
+            $profile->refresh();
+            $this->assertCanCheckout($owner, $profile);
             if ($profile->hasStripeId() && filled($profile->stripeEmail())) {
                 $profile->updateStripeCustomer(['email' => $profile->stripeEmail()]);
             }
-
-            if ($profile->checkout_expires_at?->isFuture() && $profile->checkout_url && $profile->checkout_session_id) {
-                $pending = Cashier::stripe()->checkout->sessions->retrieve($profile->checkout_session_id, ['expand' => ['line_items']]);
-                if ($pending->status === 'complete') {
-                    throw new RuntimeException('Checkout is complete. Refresh billing status before changing plans.');
-                }
-                if ($pending->status === 'open') {
-                    if (($pending->metadata->plan_key ?? null) === $plan->key
-                        && ($pending->line_items->data[0]->price->id ?? null) === $plan->provider_price_id) {
-                        return $profile->checkout_url;
-                    }
-                    Cashier::stripe()->checkout->sessions->expire($profile->checkout_session_id, []);
-                }
+            $pending = $this->pendingCheckout($profile);
+            if ($pending?->status === 'complete') {
+                throw new RuntimeException('Checkout is complete. Refresh billing status before changing plans.');
             }
-
-            $reference = [
-                'owner_type' => $owner->getMorphClass(),
-                'owner_id' => (string) $owner->getKey(),
-                'plan_key' => $plan->key,
-            ];
-            $builder = $this->subscriptionFor($owner, $plan);
-            $trial = $profile->trial_claimed_at === null && ($days = $this->trialDays()) !== null;
-
-            $subscriptionData = ['metadata' => $reference];
-            if ($trial) {
-                $subscriptionData['trial_period_days'] = $days;
+            if ($pending && ! in_array($pending->status, ['open', 'expired'], true)) {
+                throw new RuntimeException('Checkout status could not be confirmed.');
             }
+            if ($pending?->status === 'open') {
+                $price = $profile->checkout_parameters['line_items'][0]['price'] ?? $pending->line_items->data[0]->price->id ?? null;
+                if (($pending->metadata->plan_key ?? null) === $plan->key && $price === $plan->provider_price_id) {
+                    $this->rememberCheckout($profile, $pending);
 
-            $checkout = $builder->checkout([
-                'success_url' => $this->returnUrl('success'),
-                'cancel_url' => $this->returnUrl('cancel'),
-                'metadata' => $reference,
-                'subscription_data' => $subscriptionData,
-                'expires_at' => now()->addMinutes(30)->timestamp,
-            ]);
-            $profile->update([
-                'checkout_session_id' => $checkout->id,
-                'checkout_url' => $checkout->url,
-                'checkout_expires_at' => now()->addMinutes(30),
-            ]);
+                    return $pending->url;
+                }
+                Cashier::stripe()->checkout->sessions->expire($pending->id, []);
+            }
+            $profile->getConnection()->transaction(function () use ($profile, $owner, $plan) {
+                $profile = $profile->newQuery()->whereKey($profile->getKey())->lockForUpdate()->firstOrFail();
+                $this->assertCanCheckout($owner, $profile);
+                $parameters = $this->checkoutParameters($owner, $plan, $profile);
+                $profile->update([
+                    'checkout_request_key' => (string) Str::uuid(), 'checkout_parameters' => $parameters,
+                    'checkout_expires_at' => Carbon::createFromTimestampUTC($parameters['expires_at']),
+                    'checkout_session_id' => null, 'checkout_url' => null,
+                ]);
+            });
+            $profile->refresh();
+            $checkout = $this->sendCheckout($profile);
+            $this->rememberCheckout($profile, $checkout);
 
             return $checkout->url;
         });
+    }
+
+    public function expireCheckout(Model $owner): void
+    {
+        $profile = $this->profileFor($owner);
+        Cache::lock($this->checkoutLock($profile), 300)->block(5, function () use ($profile) {
+            $profile->refresh();
+            $pending = $this->pendingCheckout($profile);
+            if ($pending?->status === 'complete') {
+                throw new RuntimeException('Checkout is complete. Refresh billing status before canceling it.');
+            }
+            if ($pending?->status === 'open') {
+                $pending = Cashier::stripe()->checkout->sessions->expire($pending->id, []);
+            }
+            if ($pending && $pending->status !== 'expired') {
+                throw new RuntimeException('Checkout cancellation could not be confirmed.');
+            }
+            $profile->update(['checkout_request_key' => null, 'checkout_parameters' => null,
+                'checkout_session_id' => null, 'checkout_url' => null, 'checkout_expires_at' => null]);
+        });
+    }
+
+    protected function checkoutParameters(Model $owner, Plan $plan, BillingProfile $profile): array
+    {
+        $reference = ['owner_type' => $owner->getMorphClass(), 'owner_id' => (string) $owner->getKey(), 'plan_key' => $plan->key];
+        if (! $profile->hasStripeId()) {
+            $profile->createAsStripeCustomer();
+        }
+        $subscription = ['metadata' => [...$reference, 'name' => 'default', 'type' => 'default', 'is_on_session_checkout' => true]];
+        if ($profile->trial_claimed_at === null && ($days = $this->trialDays()) !== null) {
+            $subscription['trial_period_days'] = $days;
+        }
+        if ($rates = $profile->taxRates()) {
+            $subscription['default_tax_rates'] = $rates;
+        }
+        $parameters = [
+            'customer' => $profile->stripe_id, 'mode' => 'subscription',
+            'line_items' => array_values($this->subscriptionFor($owner, $plan)->getItems()),
+            'success_url' => $this->returnUrl('success'), 'cancel_url' => $this->returnUrl('cancel'),
+            'metadata' => $reference, 'subscription_data' => $subscription,
+            'expires_at' => now()->addMinutes(30)->timestamp,
+        ];
+        if (Cashier::$calculatesTaxes) {
+            $parameters['automatic_tax'] = ['enabled' => true];
+            $parameters['tax_id_collection'] = ['enabled' => true];
+            $parameters['billing_address_collection'] = 'required';
+            $parameters['customer_update'] = ['name' => 'auto'];
+        }
+
+        return $parameters;
+    }
+
+    private function assertCanCheckout(Model $owner, BillingProfile $profile): void
+    {
+        $subscription = $this->subscriptionForOwner($owner);
+        $cashierSubscription = $profile->subscription('default');
+        if (($subscription !== null && $subscription->status !== SubscriptionStatus::Canceled
+            && ! empty($subscription->metadata['stripe_subscription_id']))
+            || ($cashierSubscription !== null && ! in_array($cashierSubscription->stripe_status, ['canceled', 'incomplete_expired'], true))) {
+            throw new RuntimeException('A subscription already exists. Use billing management to change it.');
+        }
+    }
+
+    private function pendingCheckout(BillingProfile $profile): ?Session
+    {
+        if (! $profile->checkout_expires_at?->isFuture()) {
+            return null;
+        }
+        if ($profile->checkout_session_id) {
+            return Cashier::stripe()->checkout->sessions->retrieve($profile->checkout_session_id, ['expand' => ['line_items']]);
+        }
+
+        if (! $profile->checkout_request_key || ! $profile->checkout_parameters) {
+            return null;
+        }
+        $session = $this->sendCheckout($profile);
+        $this->rememberCheckout($profile, $session);
+
+        return Cashier::stripe()->checkout->sessions->retrieve($session->id, ['expand' => ['line_items']]);
+    }
+
+    private function sendCheckout(BillingProfile $profile): Session
+    {
+        return Cashier::stripe()->checkout->sessions->create($profile->checkout_parameters, ['idempotency_key' => $profile->checkout_request_key]);
+    }
+
+    private function rememberCheckout(BillingProfile $profile, Session $session): void
+    {
+        if (! is_string($session->id) || ! is_string($session->url)) {
+            throw new RuntimeException('Checkout was not confirmed.');
+        }
+        $profile->newQuery()->whereKey($profile->getKey())->where('checkout_request_key', $profile->checkout_request_key)
+            ->whereNotNull('checkout_expires_at')->update(['checkout_session_id' => $session->id, 'checkout_url' => $session->url]);
+    }
+
+    private function checkoutLock(BillingProfile $profile): string
+    {
+        return 'billing-checkout:'.hash('sha256', $profile->getTable().':'.$profile->getKey());
     }
 
     public function syncFromWebhook(array $payload): void
@@ -194,6 +276,8 @@ class CashierBillingProvider implements BillingProvider
             $profile->update([
                 'checkout_expires_at' => null,
                 'checkout_url' => null,
+                'checkout_request_key' => null,
+                'checkout_parameters' => null,
                 'trial_claimed_at' => $profile->trial_claimed_at ?? (! empty($current['trial_start']) ? now() : null),
             ]);
         });

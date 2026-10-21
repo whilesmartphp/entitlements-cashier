@@ -62,3 +62,9 @@ Stripe retries a failed delivery; the listener retrieves current state on each r
 An owner reuses an unexpired checkout session. Existing subscriptions are managed
 through the customer portal. Trial eligibility is claimed only when Stripe confirms
 an actual trial, and the trial lasts the configured number of days from activation.
+
+## Checkout recovery
+
+Apply the package migrations before enabling checkout. Checkout requests are saved before submission. A retry after a lost response reuses the original request and Stripe idempotency key, including its trial length and return URLs. Changing plans first recovers and expires the unfinished checkout. `expireCheckout($owner)` also recovers an interrupted checkout before canceling it.
+
+Use a shared cache store with atomic locks when checkout runs on multiple application servers. Hosts can customize `checkoutParameters` before a new request is saved; retries keep the saved parameters.

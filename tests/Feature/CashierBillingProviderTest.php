@@ -6,7 +6,6 @@ use RuntimeException;
 use Stripe\ApiRequestor;
 use Stripe\HttpClient\ClientInterface;
 use Stripe\HttpClient\CurlClient;
-use Stripe\WebhookSignature;
 use Tests\Fixtures\Owner;
 use Tests\TestCase;
 use Whilesmart\Entitlements\Contracts\BillingProvider;
@@ -73,7 +72,7 @@ class CashierBillingProviderTest extends TestCase
         try {
             $this->call('POST', '/stripe/webhook', server: [
                 'CONTENT_TYPE' => 'application/json',
-                'HTTP_STRIPE_SIGNATURE' => WebhookSignature::generateSignatureHeader($payload, 'your-webhook-secret-here'),
+                'HTTP_STRIPE_SIGNATURE' => $this->stripeSignature($payload, 'your-webhook-secret-here'),
             ], content: $payload)->assertOk();
         } finally {
             ApiRequestor::setHttpClient(CurlClient::instance());

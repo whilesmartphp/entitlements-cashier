@@ -21,6 +21,7 @@ class BillingProfile extends Model
         'trial_ends_at' => 'datetime',
         'trial_claimed_at' => 'datetime',
         'checkout_expires_at' => 'datetime',
+        'checkout_parameters' => 'array',
     ];
 
     public function getTable(): string
