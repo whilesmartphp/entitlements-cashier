@@ -17,6 +17,13 @@ class BillingProfile extends Model
 
     protected $guarded = ['id'];
 
+    protected $casts = [
+        'trial_ends_at' => 'datetime',
+        'trial_claimed_at' => 'datetime',
+        'checkout_expires_at' => 'datetime',
+        'checkout_parameters' => 'array',
+    ];
+
     public function getTable(): string
     {
         return config('entitlements-cashier.profiles_table', 'billing_profiles');
@@ -25,6 +32,11 @@ class BillingProfile extends Model
     public function owner(): MorphTo
     {
         return $this->morphTo();
+    }
+
+    public function stripeEmail(): ?string
+    {
+        return $this->owner?->email;
     }
 
     /**

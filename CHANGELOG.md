@@ -1,3 +1,12 @@
+## [0.3.0] - 2026-10-21
+
+- Recover interrupted checkouts without creating duplicate sessions, including cancellation and plan changes.
+- Reuse pending checkouts for the selected plan and price, and track claimed trials.
+- Keep subscription access aligned with Stripe status, trial expiry and billing periods through signed webhooks.
+- Preserve subscriptions when plan prices change, and use the account email and configured billing portal return URL.
+
+Run the package migrations before accepting checkout requests.
+
 ## [0.2.0] - 2026-09-20
 - A checkout can offer a trial before the first charge, set with `trial_days` (`ENTITLEMENTS_CASHIER_TRIAL_DAYS`). Left unset, a checkout charges straight away as before, and only a positive number is treated as a trial
 

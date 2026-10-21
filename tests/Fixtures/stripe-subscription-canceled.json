@@ -1,0 +1,35 @@
+{
+  "id": "sub_review_fixture1",
+  "object": "subscription",
+  "customer": "cus_review_fixture3",
+  "status": "canceled",
+  "created": 1784485410,
+  "trial_start": null,
+  "trial_end": null,
+  "latest_invoice": "in_review_fixture1",
+  "cancel_at_period_end": false,
+  "items": {
+    "object": "list",
+    "data": [
+      {
+        "id": "si_review_fixture1",
+        "object": "subscription_item",
+        "price": {
+          "id": "price_review_fixture3",
+          "object": "price",
+          "currency": "usd",
+          "unit_amount": 100,
+          "recurring": {
+            "interval": "month",
+            "interval_count": 1,
+            "meter": null,
+            "trial_period_days": null,
+            "usage_type": "licensed"
+          }
+        },
+        "current_period_start": 1789842210,
+        "current_period_end": 1792434210
+      }
+    ]
+  }
+}
