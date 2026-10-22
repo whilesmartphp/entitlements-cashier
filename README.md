@@ -44,6 +44,8 @@ Publish with `php artisan vendor:publish --tag=entitlements-cashier-config`.
 | `success_url` / `cancel_url` | Where Stripe Checkout returns; defaults to the app URL. |
 | `default_plan` | Plan used when no subscription grants access. A host-provided plan source retains precedence. |
 | `register_migrations` | Set false to bring your own migrations. |
+| `promotion_codes` | Set true to show a promotion code field on checkout (`ENTITLEMENTS_CASHIER_PROMOTION_CODES`). |
+| `card_only_when_due` | Set true to ask for a card only when the checkout has an amount due, so a full discount needs none (`ENTITLEMENTS_CASHIER_CARD_ONLY_WHEN_DUE`). |
 
 ## Testing
 

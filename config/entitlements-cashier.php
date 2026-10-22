@@ -22,6 +22,14 @@ return [
     // straight away, which is what happens when this is unset.
     'trial_days' => env('ENTITLEMENTS_CASHIER_TRIAL_DAYS'),
 
+    // Show a promotion code field on checkout, so a code made in Stripe can be
+    // redeemed by the buyer.
+    'promotion_codes' => env('ENTITLEMENTS_CASHIER_PROMOTION_CODES', false),
+
+    // Ask for a card only when the checkout has something to charge. A code
+    // that takes the whole price off then subscribes without one.
+    'card_only_when_due' => env('ENTITLEMENTS_CASHIER_CARD_ONLY_WHEN_DUE', false),
+
     // The plan an owner falls back to when their Stripe subscription is deleted.
     // Null cancels the entitlement subscription instead of granting a plan.
     'default_plan' => env('ENTITLEMENTS_CASHIER_DEFAULT_PLAN'),

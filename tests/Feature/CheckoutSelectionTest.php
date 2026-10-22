@@ -118,6 +118,24 @@ class CheckoutSelectionTest extends TestCase
         $this->assertSame([], $this->transport->creates);
     }
 
+    public function test_checkout_offers_no_promotion_code_and_always_asks_for_a_card_by_default(): void
+    {
+        $this->postJson('/checkout/'.$this->owner->id, ['plan' => $this->monthly->key])->assertOk();
+
+        $this->assertArrayNotHasKey('allow_promotion_codes', $this->transport->creates[0]);
+        $this->assertArrayNotHasKey('payment_method_collection', $this->transport->creates[0]);
+    }
+
+    public function test_checkout_takes_a_promotion_code_and_skips_the_card_when_nothing_is_due(): void
+    {
+        config(['entitlements-cashier.promotion_codes' => 'true', 'entitlements-cashier.card_only_when_due' => 'true']);
+
+        $this->postJson('/checkout/'.$this->owner->id, ['plan' => $this->monthly->key])->assertOk();
+
+        $this->assertSame('true', $this->transport->creates[0]['allow_promotion_codes']);
+        $this->assertSame('if_required', $this->transport->creates[0]['payment_method_collection']);
+    }
+
     public function test_switching_to_yearly_expires_the_monthly_checkout(): void
     {
         $this->pendingProfile($this->fixture('open'));
