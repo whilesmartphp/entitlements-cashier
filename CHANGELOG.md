@@ -1,3 +1,8 @@
+## [0.4.0] - 2026-10-23
+
+- Checkout shows the promotion code box, so buyers can redeem a discount. Set `promotion_codes` to false to hide it.
+- `PromotionCodes` creates, lists, stops and ends Stripe promotion codes. A code can be held for one owner, and ending a code takes it off the subscriptions already carrying it.
+
 ## [0.3.0] - 2026-10-21
 
 - Recover interrupted checkouts without creating duplicate sessions, including cancellation and plan changes.

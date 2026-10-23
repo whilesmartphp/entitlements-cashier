@@ -118,6 +118,17 @@ class CheckoutSelectionTest extends TestCase
         $this->assertSame([], $this->transport->creates);
     }
 
+    public function test_checkout_takes_promotion_codes_unless_turned_off(): void
+    {
+        $this->postJson('/checkout/'.$this->owner->id, ['plan' => $this->monthly->key])->assertOk();
+        $this->assertSame('true', $this->transport->creates[0]['allow_promotion_codes']);
+
+        config(['entitlements-cashier.promotion_codes' => false]);
+        $this->postJson('/checkout/'.$this->owner->id.'/cancel')->assertNoContent();
+        $this->postJson('/checkout/'.$this->owner->id, ['plan' => $this->monthly->key])->assertOk();
+        $this->assertArrayNotHasKey('allow_promotion_codes', end($this->transport->creates));
+    }
+
     public function test_switching_to_yearly_expires_the_monthly_checkout(): void
     {
         $this->pendingProfile($this->fixture('open'));
