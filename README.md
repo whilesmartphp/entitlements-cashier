@@ -44,6 +44,26 @@ Publish with `php artisan vendor:publish --tag=entitlements-cashier-config`.
 | `success_url` / `cancel_url` | Where Stripe Checkout returns; defaults to the app URL. |
 | `default_plan` | Plan used when no subscription grants access. A host-provided plan source retains precedence. |
 | `register_migrations` | Set false to bring your own migrations. |
+| `promotion_codes` | Show the promotion code box on checkout. On by default. |
+
+## Discount codes
+
+`PromotionCodes` makes the codes a buyer types at checkout, as Stripe promotion codes:
+
+```php
+$codes = app(\Whilesmart\EntitlementsCashier\Discounts\PromotionCodes::class);
+
+$codes->create('PILOT20', PromotionCodes::REPEATING, percentOff: 20, months: 3);
+$codes->create('ADA50', PromotionCodes::FOREVER, percentOff: 50, for: $owner);
+$codes->all();
+$codes->stop($id);
+$codes->end($id);
+```
+
+`stop` keeps anybody new from using a code, and subscriptions that already carry it
+keep it. `end` also takes it off those subscriptions from their next bill, which is
+the only way a code that lasts forever ends. A code held for one owner needs that
+owner to have a Stripe customer, which their first checkout makes.
 
 ## Testing
 
