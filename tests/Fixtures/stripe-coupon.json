@@ -1,0 +1,17 @@
+{
+    "id": "SFIaOG95",
+    "object": "coupon",
+    "amount_off": null,
+    "created": 1790171410,
+    "currency": null,
+    "duration": "once",
+    "duration_in_months": null,
+    "livemode": false,
+    "max_redemptions": null,
+    "metadata": [],
+    "name": "NOBODY",
+    "percent_off": 50,
+    "redeem_by": null,
+    "times_redeemed": 0,
+    "valid": true
+}

@@ -1,0 +1,142 @@
+{
+    "object": "list",
+    "data": [
+        {
+            "id": "promo_1UIqZBEJCuaVh7ciHfPib1Mb",
+            "object": "promotion_code",
+            "active": false,
+            "code": "JUSTFORFON",
+            "created": 1790171433,
+            "customer": "cus_VJTWVB2ooqlNzA",
+            "customer_account": null,
+            "expires_at": null,
+            "livemode": false,
+            "max_redemptions": null,
+            "metadata": [],
+            "promotion": {
+                "coupon": {
+                    "id": "YDQDkcFr",
+                    "object": "coupon",
+                    "deleted": true
+                },
+                "type": "coupon"
+            },
+            "restrictions": {
+                "first_time_transaction": false,
+                "minimum_amount": null,
+                "minimum_amount_currency": null
+            },
+            "times_redeemed": 0
+        },
+        {
+            "id": "promo_1UIdP6EJCuaVh7ci1ROFyuoC",
+            "object": "promotion_code",
+            "active": false,
+            "code": "TENOFF",
+            "created": 1790120836,
+            "customer": null,
+            "customer_account": null,
+            "expires_at": 1798761599,
+            "livemode": false,
+            "max_redemptions": null,
+            "metadata": [],
+            "promotion": {
+                "coupon": {
+                    "id": "8l3CLMzA",
+                    "object": "coupon",
+                    "deleted": true
+                },
+                "type": "coupon"
+            },
+            "restrictions": {
+                "first_time_transaction": false,
+                "minimum_amount": null,
+                "minimum_amount_currency": null
+            },
+            "times_redeemed": 0
+        },
+        {
+            "id": "promo_1UIdP5EJCuaVh7ciJ5WtMbPY",
+            "object": "promotion_code",
+            "active": false,
+            "code": "ALWAYS25",
+            "created": 1790120835,
+            "customer": null,
+            "customer_account": null,
+            "expires_at": null,
+            "livemode": false,
+            "max_redemptions": null,
+            "metadata": [],
+            "promotion": {
+                "coupon": {
+                    "id": "3YKF9EE6",
+                    "object": "coupon",
+                    "deleted": true
+                },
+                "type": "coupon"
+            },
+            "restrictions": {
+                "first_time_transaction": false,
+                "minimum_amount": null,
+                "minimum_amount_currency": null
+            },
+            "times_redeemed": 0
+        },
+        {
+            "id": "promo_1UIdOvEJCuaVh7ciQd7HDTDl",
+            "object": "promotion_code",
+            "active": false,
+            "code": "PILOT3FREE",
+            "created": 1790120825,
+            "customer": null,
+            "customer_account": null,
+            "expires_at": null,
+            "livemode": false,
+            "max_redemptions": 5,
+            "metadata": [],
+            "promotion": {
+                "coupon": {
+                    "id": "ChgAj5aZ",
+                    "object": "coupon",
+                    "deleted": true
+                },
+                "type": "coupon"
+            },
+            "restrictions": {
+                "first_time_transaction": false,
+                "minimum_amount": null,
+                "minimum_amount_currency": null
+            },
+            "times_redeemed": 0
+        },
+        {
+            "id": "promo_1UIdOjEJCuaVh7ciluQvlW7h",
+            "object": "promotion_code",
+            "active": false,
+            "code": "PROBE3251",
+            "created": 1790120813,
+            "customer": null,
+            "customer_account": null,
+            "expires_at": null,
+            "livemode": false,
+            "max_redemptions": null,
+            "metadata": [],
+            "promotion": {
+                "coupon": {
+                    "id": "rp7pv3S5",
+                    "object": "coupon",
+                    "deleted": true
+                },
+                "type": "coupon"
+            },
+            "restrictions": {
+                "first_time_transaction": false,
+                "minimum_amount": null,
+                "minimum_amount_currency": null
+            },
+            "times_redeemed": 0
+        }
+    ],
+    "has_more": false,
+    "url": "/v1/promotion_codes"
+}
