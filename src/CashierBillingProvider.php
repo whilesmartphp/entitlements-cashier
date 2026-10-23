@@ -114,6 +114,9 @@ class CashierBillingProvider implements BillingProvider
             'metadata' => $reference, 'subscription_data' => $subscription,
             'expires_at' => now()->addMinutes(30)->timestamp,
         ];
+        if (config('entitlements-cashier.promotion_codes', true)) {
+            $parameters['allow_promotion_codes'] = true;
+        }
         if (Cashier::$calculatesTaxes) {
             $parameters['automatic_tax'] = ['enabled' => true];
             $parameters['tax_id_collection'] = ['enabled' => true];
