@@ -26,6 +26,8 @@ class PromotionCodesTransport implements ClientInterface
             $method === 'get' && $path === '/v1/promotion_codes' => [json_encode($codes), 200, []],
             $method === 'post' && $path === '/v1/coupons' => [file_get_contents(__DIR__.'/../Fixtures/stripe-coupon.json'), 200, []],
             $method === 'post' && str_starts_with($path, '/v1/promotion_codes') => [json_encode($codes['data'][0]), 200, []],
+            $method === 'get' && $path === '/v1/subscriptions' => [file_get_contents(__DIR__.'/../Fixtures/stripe-subscriptions-discounted.json'), 200, []],
+            $method === 'post' && str_starts_with($path, '/v1/subscriptions/') => [file_get_contents(__DIR__.'/../Fixtures/stripe-subscription-discount-ended.json'), 200, []],
         };
     }
 }
@@ -90,6 +92,24 @@ class PromotionCodesTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         app(PromotionCodes::class)->create('PILOT20', PromotionCodes::ONCE, percentOff: 20, amountOff: 5);
+    }
+
+    public function test_ending_a_code_takes_it_off_the_subscriptions_carrying_it(): void
+    {
+        $ended = app(PromotionCodes::class)->end('promo_1UTYHHEJCuaVh7cirXXRMtxC');
+
+        $this->assertSame(1, $ended);
+        $this->assertSame(['active' => 'false'], $this->transport->requests[0]['params']);
+        $updates = array_values(array_filter($this->transport->requests, fn ($request) => $request['method'] === 'post' && str_starts_with($request['path'], '/v1/subscriptions/')));
+        $this->assertCount(1, $updates);
+        $this->assertSame('/v1/subscriptions/sub_1USmeZEJCuaVh7ci1CifKEX6', $updates[0]['path']);
+        $this->assertSame(['discounts' => ''], $updates[0]['params']);
+    }
+
+    public function test_ending_a_code_nobody_carries_changes_no_subscription(): void
+    {
+        $this->assertSame(0, app(PromotionCodes::class)->end('promo_unused'));
+        $this->assertSame([], array_filter($this->transport->requests, fn ($request) => str_starts_with($request['path'], '/v1/subscriptions/')));
     }
 
     public function test_stopping_a_code_turns_it_off_in_stripe(): void
